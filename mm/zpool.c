@@ -198,7 +198,6 @@ struct zpool *zpool_create_pool(const char *type, const char *name, gfp_t gfp,
 
 	return zpool;
 }
-EXPORT_SYMBOL(zpool_create_pool);
 
 /**
  * zpool_destroy_pool() - Destroy a zpool
@@ -222,7 +221,6 @@ void zpool_destroy_pool(struct zpool *zpool)
 	zpool_put_driver(zpool->driver);
 	kfree(zpool);
 }
-EXPORT_SYMBOL(zpool_destroy_pool);
 
 /**
  * zpool_get_type() - Get the type of the zpool
@@ -260,7 +258,6 @@ int zpool_malloc(struct zpool *zpool, size_t size, gfp_t gfp,
 {
 	return zpool->driver->malloc(zpool->pool, size, gfp, handle);
 }
-EXPORT_SYMBOL(zpool_malloc);
 
 /**
  * zpool_free() - Free previously allocated memory
@@ -280,7 +277,6 @@ void zpool_free(struct zpool *zpool, unsigned long handle)
 {
 	zpool->driver->free(zpool->pool, handle);
 }
-EXPORT_SYMBOL(zpool_free);
 
 /**
  * zpool_shrink() - Shrink the pool size
@@ -307,76 +303,52 @@ int zpool_shrink(struct zpool *zpool, unsigned int pages,
 }
 
 /**
- * zpool_map_handle() - Map a previously allocated handle into memory
+ * zpool_obj_read_begin() - Start reading from a previously allocated handle.
  * @zpool:	The zpool that the handle was allocated from
- * @handle:	The handle to map
- * @mapmode:	How the memory should be mapped
+ * @handle:	The handle to read from
+ * @local_copy:	A local buffer to use if needed.
  *
- * This maps a previously allocated handle into memory.  The @mapmode
- * param indicates to the implementation how the memory will be
- * used, i.e. read-only, write-only, read-write.  If the
- * implementation does not support it, the memory will be treated
- * as read-write.
+ * This starts a read operation of a previously allocated handle. The passed
+ * @local_copy buffer may be used if needed by copying the memory into.
+ * zpool_obj_read_end() MUST be called after the read is completed to undo any
+ * actions taken (e.g. release locks).
  *
- * This may hold locks, disable interrupts, and/or preemption,
- * and the zpool_unmap_handle() must be called to undo those
- * actions.  The code that uses the mapped handle should complete
- * its operatons on the mapped handle memory quickly and unmap
- * as soon as possible.  As the implementation may use per-cpu
- * data, multiple handles should not be mapped concurrently on
- * any cpu.
- *
- * Returns: A pointer to the handle's mapped memory area.
+ * Returns: A pointer to the handle memory to be read, if @local_copy is used,
+ * the returned pointer is @local_copy.
  */
-void *zpool_map_handle(struct zpool *zpool, unsigned long handle,
-			enum zpool_mapmode mapmode)
+void *zpool_obj_read_begin(struct zpool *zpool, unsigned long handle,
+			   void *local_copy)
 {
-	return zpool->driver->map(zpool->pool, handle, mapmode);
+	return zpool->driver->obj_read_begin(zpool->pool, handle, local_copy);
 }
-EXPORT_SYMBOL(zpool_map_handle);
 
 /**
- * zpool_unmap_handle() - Unmap a previously mapped handle
+ * zpool_obj_read_end() - Finish reading from a previously allocated handle.
  * @zpool:	The zpool that the handle was allocated from
- * @handle:	The handle to unmap
+ * @handle:	The handle to read from
+ * @handle_mem:	The pointer returned by zpool_obj_read_begin()
  *
- * This unmaps a previously mapped handle.  Any locks or other
- * actions that the implementation took in zpool_map_handle()
- * will be undone here.  The memory area returned from
- * zpool_map_handle() should no longer be used after this.
+ * Finishes a read operation previously started by zpool_obj_read_begin().
  */
-void zpool_unmap_handle(struct zpool *zpool, unsigned long handle)
+void zpool_obj_read_end(struct zpool *zpool, unsigned long handle,
+			void *handle_mem)
 {
-	zpool->driver->unmap(zpool->pool, handle);
+	zpool->driver->obj_read_end(zpool->pool, handle, handle_mem);
 }
-EXPORT_SYMBOL(zpool_unmap_handle);
-
- /**
- * zpool_compact() - try to run compaction over zpool
- * @pool       The zpool to compact
- *
- * Returns: the number of migrated pages
- */
-unsigned long zpool_compact(struct zpool *zpool)
-{
-	return zpool->driver->compact ?
-		zpool->driver->compact(zpool->pool) : 0;
-}
-EXPORT_SYMBOL(zpool_compact);
-
 
 /**
- * zpool_get_num_compacted() - get the number of migrated/compacted pages
+ * zpool_obj_write() - Write to a previously allocated handle.
+ * @zpool:	The zpool that the handle was allocated from
+ * @handle:	The handle to read from
+ * @handle_mem:	The memory to copy from into the handle.
+ * @mem_len:	The length of memory to be written.
  *
- * Returns: the total number of compacted pages for the pool, or 0 if the
- * backend doesn't provide get_num_compacted() callback
  */
-unsigned long zpool_get_num_compacted(struct zpool *zpool)
+void zpool_obj_write(struct zpool *zpool, unsigned long handle,
+		     void *handle_mem, size_t mem_len)
 {
-	return zpool->driver->get_num_compacted ?
-		zpool->driver->get_num_compacted(zpool->pool) : 0;
+	zpool->driver->obj_write(zpool->pool, handle, handle_mem, mem_len);
 }
-EXPORT_SYMBOL(zpool_get_num_compacted);
 
 /**
  * zpool_get_total_size() - The total size of the pool
@@ -390,7 +362,6 @@ u64 zpool_get_total_size(struct zpool *zpool)
 {
 	return zpool->driver->total_size(zpool->pool);
 }
-EXPORT_SYMBOL(zpool_get_total_size);
 
 /**
  * zpool_evictable() - Test if zpool is potentially evictable
@@ -409,19 +380,6 @@ bool zpool_evictable(struct zpool *zpool)
 {
 	return zpool->evictable;
 }
-
-/**
- * zpool_huge_class_size() - get size for the "huge" class
- * @pool	The zpool to check
- *
- * Returns: size of the huge class
- */
-size_t zpool_huge_class_size(struct zpool *zpool)
-{
-	return zpool->driver->huge_class_size ?
-		zpool->driver->huge_class_size(zpool->pool) : 0;
-}
-EXPORT_SYMBOL(zpool_huge_class_size);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Dan Streetman <ddstreet@ieee.org>");

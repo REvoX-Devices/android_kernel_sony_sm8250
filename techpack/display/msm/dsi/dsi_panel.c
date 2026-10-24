@@ -39,7 +39,7 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define MIN_PREFILL_LINES      35
 #ifdef CONFIG_DRM_SDE_SPECIFIC_PANEL
-#define AOD_MODE_THRESHOLD 35
+#define AOD_MODE_THRESHOLD 4096
 #endif /* CONFIG_DRM_SDE_SPECIFIC_PANEL */
 
 enum dsi_dsc_ratio_type {
@@ -3930,7 +3930,9 @@ void dsi_panel_put_mode(struct dsi_display_mode *mode)
 		dsi_panel_dealloc_cmd_packets(&mode->priv_info->cmd_sets[i]);
 	}
 
+	kfree(mode->priv_info->phy_timing_val);
 	kfree(mode->priv_info);
+	mode->priv_info = NULL;
 }
 
 void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
@@ -4299,6 +4301,9 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		panel->spec_pdata->aod_mode = 1;
 		pr_notice("%s: set AOD mode ON\n", __func__);
 	}
+
+	// Set AOD Brightness value
+	dsi_panel_set_aod_change(panel, dsi_panel_get_backlight(panel));
 #else
 	if (rc)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",

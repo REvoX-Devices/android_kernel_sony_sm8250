@@ -18,25 +18,6 @@ struct zpool_ops {
 	int (*evict)(struct zpool *pool, unsigned long handle);
 };
 
-/*
- * Control how a handle is mapped.  It will be ignored if the
- * implementation does not support it.  Its use is optional.
- * Note that this does not refer to memory protection, it
- * refers to how the memory will be copied in/out if copying
- * is necessary during mapping; read-write is the safest as
- * it copies the existing memory in on map, and copies the
- * changed memory back out on unmap.  Write-only does not copy
- * in the memory and should only be used for initialization.
- * If in doubt, use ZPOOL_MM_DEFAULT which is read-write.
- */
-enum zpool_mapmode {
-	ZPOOL_MM_RW, /* normal read-write mapping */
-	ZPOOL_MM_RO, /* read-only (no copy-out at unmap time) */
-	ZPOOL_MM_WO, /* write-only (no copy-in at map time) */
-
-	ZPOOL_MM_DEFAULT = ZPOOL_MM_RW
-};
-
 bool zpool_has_pool(char *type);
 
 struct zpool *zpool_create_pool(const char *type, const char *name,
@@ -54,18 +35,18 @@ void zpool_free(struct zpool *pool, unsigned long handle);
 int zpool_shrink(struct zpool *pool, unsigned int pages,
 			unsigned int *reclaimed);
 
-void *zpool_map_handle(struct zpool *pool, unsigned long handle,
-			enum zpool_mapmode mm);
+void *zpool_obj_read_begin(struct zpool *zpool, unsigned long handle,
+			   void *local_copy);
 
-void zpool_unmap_handle(struct zpool *pool, unsigned long handle);
+void zpool_obj_read_end(struct zpool *zpool, unsigned long handle,
+			void *handle_mem);
 
-unsigned long zpool_compact(struct zpool *pool);
-
-unsigned long zpool_get_num_compacted(struct zpool *pool);
+void zpool_obj_write(struct zpool *zpool, unsigned long handle,
+		     void *handle_mem, size_t mem_len);
 
 u64 zpool_get_total_size(struct zpool *pool);
 
-size_t zpool_huge_class_size(struct zpool *zpool);
+
 /**
  * struct zpool_driver - driver implementation for zpool
  * @type:	name of the driver.
@@ -77,10 +58,7 @@ size_t zpool_huge_class_size(struct zpool *zpool);
  * @shrink:	shrink the pool.
  * @map:	map a handle.
  * @unmap:	unmap a handle.
- * @compact:	try to run compaction over a pool
- * @get_num_compacted:	get amount of compacted pages for a pool
  * @total_size:	get total size of a pool.
- * @huge_class_size: huge class threshold for pool pages
  *
  * This is created by a zpool implementation and registered
  * with zpool.
@@ -104,15 +82,14 @@ struct zpool_driver {
 	int (*shrink)(void *pool, unsigned int pages,
 				unsigned int *reclaimed);
 
-	void *(*map)(void *pool, unsigned long handle,
-				enum zpool_mapmode mm);
-	void (*unmap)(void *pool, unsigned long handle);
-
-	unsigned long (*compact)(void *pool);
-	unsigned long (*get_num_compacted)(void *pool);
+	void *(*obj_read_begin)(void *pool, unsigned long handle,
+				void *local_copy);
+	void (*obj_read_end)(void *pool, unsigned long handle,
+			     void *handle_mem);
+	void (*obj_write)(void *pool, unsigned long handle,
+			  void *handle_mem, size_t mem_len);
 
 	u64 (*total_size)(void *pool);
-	size_t (*huge_class_size)(void *pool);
 };
 
 void zpool_register_driver(struct zpool_driver *driver);

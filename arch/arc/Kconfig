@@ -69,9 +69,6 @@ config SCHED_OMIT_FRAME_POINTER
 config GENERIC_CSUM
 	def_bool y
 
-config RWSEM_GENERIC_SPINLOCK
-	def_bool y
-
 config ARCH_DISCONTIGMEM_ENABLE
 	def_bool n
 
@@ -360,7 +357,7 @@ config NODES_SHIFT
 	default "0" if !DISCONTIGMEM
 	default "1" if DISCONTIGMEM
 	depends on NEED_MULTIPLE_NODES
-	---help---
+	help
 	  Accessing memory beyond 1GB (with or w/o PAE) requires 2 memory
 	  zones.
 

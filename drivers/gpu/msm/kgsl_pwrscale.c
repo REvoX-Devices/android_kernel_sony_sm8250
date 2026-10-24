@@ -445,8 +445,6 @@ static void popp_trans1(struct kgsl_device *device)
 		psc->popp_level = 0;
 		break;
 	}
-
-	trace_kgsl_popp_level(device, old_level, psc->popp_level);
 }
 
 /*
@@ -457,7 +455,6 @@ static int popp_trans2(struct kgsl_device *device, int level)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	struct kgsl_pwrscale *psc = &device->pwrscale;
-	int old_level = psc->popp_level;
 
 	if (!test_bit(POPP_ON, &psc->popp_state))
 		return level;
@@ -466,7 +463,6 @@ static int popp_trans2(struct kgsl_device *device, int level)
 	/* If the governor recommends going down, do it! */
 	if (pwr->active_pwrlevel < level) {
 		psc->popp_level = 0;
-		trace_kgsl_popp_level(device, old_level, psc->popp_level);
 		return level;
 	}
 
@@ -491,8 +487,6 @@ static int popp_trans2(struct kgsl_device *device, int level)
 		psc->popp_level = 0;
 		break;
 	}
-
-	trace_kgsl_popp_level(device, old_level, psc->popp_level);
 
 	return level;
 }
@@ -749,29 +743,19 @@ int kgsl_busmon_get_dev_status(struct device *dev,
 	return 0;
 }
 
-#ifdef DEVFREQ_FLAG_FAST_HINT
-static inline bool _check_fast_hint(u32 flags)
+static int _read_hint(u32 flags)
 {
-	return (flags & DEVFREQ_FLAG_FAST_HINT);
+	switch (flags) {
+	case BUSMON_FLAG_FAST_HINT:
+		return 1;
+	case BUSMON_FLAG_SUPER_FAST_HINT:
+		return 2;
+	case BUSMON_FLAG_SLOW_HINT:
+		return -1;
+	default:
+		return 0;
+	}
 }
-#else
-static inline bool _check_fast_hint(u32 flags)
-{
-	return false;
-}
-#endif
-
-#ifdef DEVFREQ_FLAG_SLOW_HINT
-static inline bool _check_slow_hint(u32 flags)
-{
-	return (flags & DEVFREQ_FLAG_SLOW_HINT);
-}
-#else
-static inline bool _check_slow_hint(u32 flags)
-{
-	return false;
-}
-#endif
 
 /*
  * kgsl_busmon_target - devfreq_dev_profile.target callback
@@ -821,10 +805,7 @@ int kgsl_busmon_target(struct device *dev, unsigned long *freq, u32 flags)
 	}
 
 	b = pwr->bus_mod;
-	if (_check_fast_hint(bus_flag))
-		pwr->bus_mod++;
-	else if (_check_slow_hint(bus_flag))
-		pwr->bus_mod--;
+	pwr->bus_mod += _read_hint(bus_flag);
 
 	/* trim calculated change to fit range */
 	if (pwr_level->bus_freq + pwr->bus_mod < pwr_level->bus_min)
@@ -1028,6 +1009,13 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	} else
 		data->bus.num = 0;
 
+	pwrscale->devfreq_wq = create_freezable_workqueue("kgsl_devfreq_wq");
+	if (!pwrscale->devfreq_wq) {
+		dev_err(device->dev, "Failed to allocate kgsl devfreq workqueue\n");
+		device->pwrscale.enabled = false;
+		return -ENOMEM;
+	}
+
 	devfreq = devfreq_add_device(dev, &pwrscale->gpu_profile.profile,
 			governor, pwrscale->gpu_profile.private_data);
 	if (IS_ERR(devfreq)) {
@@ -1074,7 +1062,6 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	ret = sysfs_create_link(&device->dev->kobj,
 			&devfreq->dev.kobj, "devfreq");
 
-	pwrscale->devfreq_wq = create_freezable_workqueue("kgsl_devfreq_wq");
 	INIT_WORK(&pwrscale->devfreq_suspend_ws, do_devfreq_suspend);
 	INIT_WORK(&pwrscale->devfreq_resume_ws, do_devfreq_resume);
 	INIT_WORK(&pwrscale->devfreq_notify_ws, do_devfreq_notify);
@@ -1125,8 +1112,13 @@ void kgsl_pwrscale_close(struct kgsl_device *device)
 		devfreq_cooling_unregister(pwrscale->cooling_dev);
 
 	kgsl_pwrscale_midframe_timer_cancel(device);
-	flush_workqueue(pwrscale->devfreq_wq);
-	destroy_workqueue(pwrscale->devfreq_wq);
+
+	if (pwrscale->devfreq_wq) {
+		flush_workqueue(pwrscale->devfreq_wq);
+		destroy_workqueue(pwrscale->devfreq_wq);
+		pwrscale->devfreq_wq = NULL;
+	}
+
 	devfreq_remove_device(device->pwrscale.devfreqptr);
 	kfree(kgsl_midframe);
 	kgsl_midframe = NULL;

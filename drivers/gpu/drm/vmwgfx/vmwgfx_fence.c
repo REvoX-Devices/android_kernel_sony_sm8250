@@ -184,6 +184,9 @@ static long vmw_fence_wait(struct dma_fence *f, bool intr, signed long timeout)
 
 	spin_lock(f->lock);
 
+	if (test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &f->flags))
+		goto out;
+
 	if (intr && signal_pending(current)) {
 		ret = -ERESTARTSYS;
 		goto out;
@@ -1064,7 +1067,7 @@ static int vmw_event_fence_action_create(struct drm_file *file_priv,
 	}
 
 	event->event.base.type = DRM_VMW_EVENT_FENCE_SIGNALED;
-	event->event.base.length = sizeof(*event);
+	event->event.base.length = sizeof(event->event);
 	event->event.user_data = user_data;
 
 	ret = drm_event_reserve_init(dev, file_priv, &event->base, &event->event.base);
